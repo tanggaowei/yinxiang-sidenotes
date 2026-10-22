@@ -199,12 +199,17 @@ class YinxiangSyncEngine {
         return Notebook(guid: guid, name: nbName, isDefault: false)
     }
 
-    func fetchNotes(token: String, china: Bool, notebookGuid: String) async throws -> [Note] {
-        let res = try await executeWorker(action: "fetch-notes", payload: [
+    func fetchNotes(token: String, china: Bool, notebookGuid: String, knownNotes: [String: Double] = [:]) async throws -> [Note] {
+        var payload: [String: Any] = [
             "token": token,
             "china": china,
             "notebookGuid": notebookGuid
-        ])
+        ]
+        if !knownNotes.isEmpty {
+            payload["knownNotes"] = knownNotes
+        }
+
+        let res = try await executeWorker(action: "fetch-notes", payload: payload)
         guard let notesData = res["notes"] as? [[String: Any]] else {
             return []
         }
@@ -213,6 +218,7 @@ class YinxiangSyncEngine {
             guard let guid = item["guid"] as? String,
                   let title = item["title"] as? String else { return nil }
             let content = item["content"] as? String ?? ""
+            let notModified = item["notModified"] as? Bool ?? false
             let updatedMillis = item["updated"] as? Double ?? Date().timeIntervalSince1970 * 1000
             let updatedDate = Date(timeIntervalSince1970: updatedMillis / 1000.0)
 
@@ -224,7 +230,8 @@ class YinxiangSyncEngine {
                 updatedAt: updatedDate,
                 color: .gray,
                 isPinned: false,
-                isDirty: false
+                isDirty: false,
+                notModified: notModified
             )
         }
     }

@@ -7,7 +7,7 @@ const Evernote = require('evernote');
 
 // Simple Markdown <-> ENML converter
 function markdownToEnml(markdown) {
-  if (!markdown) markdown = '';
+  if (!markdown) return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">\n<en-note></en-note>';
   
   const lines = markdown.split('\n');
   let bodyHtml = '';
@@ -51,8 +51,8 @@ function markdownToEnml(markdown) {
       continue;
     }
 
-    // Regular line
-    bodyHtml += `<div>${escapeXml(trimmed)}</div>`;
+    // Regular line - preserve leading indentation
+    bodyHtml += `<div>${escapeXml(line)}</div>`;
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -70,21 +70,30 @@ function enmlToMarkdown(enml) {
   text = text.replace(/<en-note[\s\S]*?>/gi, '');
   text = text.replace(/<\/en-note>/gi, '');
 
-  // Replace en-todo
-  text = text.replace(/<en-todo\s+checked="true"\s*\/?>/gi, '- [x] ');
-  text = text.replace(/<en-todo\s+checked="false"\s*\/?>/gi, '- [ ] ');
-  text = text.replace(/<en-todo\s*\/?>/gi, '- [ ] ');
+  // Strip formatting whitespace adjacent to block tags
+  text = text.replace(/(<\/?(?:en-note|div|p|h[1-6]|li|ul|ol|table|tr|td|blockquote)[^>]*>)\s*\r?\n\s*/gi, '$1');
+  text = text.replace(/\s*\r?\n\s*(<\/?(?:en-note|div|p|h[1-6]|li|ul|ol|table|tr|td|blockquote)[^>]*>)/gi, '$1');
 
-  // Headers
-  text = text.replace(/<h1>([\s\S]*?)<\/h1>/gi, '# $1\n');
-  text = text.replace(/<h2>([\s\S]*?)<\/h2>/gi, '## $1\n');
-  text = text.replace(/<h3>([\s\S]*?)<\/h3>/gi, '### $1\n');
+  // Replace en-todo (consume any whitespace following tag to avoid accumulating spaces)
+  text = text.replace(/<en-todo\s+checked="true"\s*\/?>\s*/gi, '- [x] ');
+  text = text.replace(/<en-todo\s+checked="false"\s*\/?>\s*/gi, '- [ ] ');
+  text = text.replace(/<en-todo\s*\/?>\s*/gi, '- [ ] ');
 
-  // Paragraphs & Divs
-  text = text.replace(/<div>([\s\S]*?)<\/div>/gi, '$1\n');
-  text = text.replace(/<p>([\s\S]*?)<\/p>/gi, '$1\n\n');
+  // Headers (supporting tag attributes)
+  text = text.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, '# $1\n');
+  text = text.replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, '## $1\n');
+  text = text.replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, '### $1\n');
+
+  // Empty lines in divs/paragraphs (e.g. <div><br/></div>, <p><br/></p>, <div>&nbsp;</div>, <div></div>)
+  text = text.replace(/<(div|p)[^>]*>\s*(<br\s*\/?>|&nbsp;)?\s*<\/\1>/gi, '\n');
+
+  // Non-empty Divs and Paragraphs (supporting tag attributes)
+  text = text.replace(/<div[^>]*>([\s\S]*?)<\/div>/gi, '$1\n');
+  text = text.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, '$1\n');
+
+  // Inner <br/> within a block
   text = text.replace(/<br\s*\/?>/gi, '\n');
-  text = text.replace(/<li>([\s\S]*?)<\/li>/gi, '- $1\n');
+  text = text.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, '- $1\n');
 
   // Strip remaining HTML tags
   text = text.replace(/<[^>]+>/g, '');
@@ -96,6 +105,9 @@ function enmlToMarkdown(enml) {
              .replace(/&quot;/g, '"')
              .replace(/&apos;/g, "'")
              .replace(/&nbsp;/g, ' ');
+
+  // Replace bullet points back to markdown list if they were converted
+  text = text.replace(/^• /gm, '- ');
 
   return text.trim();
 }
@@ -110,6 +122,10 @@ function escapeXml(unsafe) {
       case '"': return '&quot;';
     }
   });
+}
+
+function isValidGuid(guid) {
+  return typeof guid === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(guid);
 }
 
 function getClient(token, china) {
@@ -202,43 +218,99 @@ async function handleAction(action, args) {
     }
 
     case 'fetch-notes': {
-      const notebookGuid = args.notebookGuid;
+      let notebookGuid = args.notebookGuid;
+      const knownNotes = args.knownNotes || {};
       const noteStore = client.getNoteStore();
       const filter = new Evernote.NoteStore.NoteFilter({
-        notebookGuid: notebookGuid,
         order: Evernote.Types.NoteSortOrder.UPDATED,
         ascending: false
       });
+
+      if (isValidGuid(notebookGuid)) {
+        filter.notebookGuid = notebookGuid;
+      } else {
+        // Fallback to default notebook if notebookGuid is not a valid GUID
+        try {
+          const defNb = await noteStore.getDefaultNotebook();
+          if (defNb && defNb.guid) {
+            filter.notebookGuid = defNb.guid;
+            notebookGuid = defNb.guid;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
       const spec = new Evernote.NoteStore.NotesMetadataResultSpec({
         includeTitle: true,
         includeUpdated: true,
         includeCreated: true
       });
 
-      const metaList = await noteStore.findNotesMetadata(filter, 0, 50, spec);
+      // Paginate to retrieve all active notes for this notebook
+      const pageSize = 100;
+      let offset = 0;
+      const allMetas = [];
+
+      while (true) {
+        const metaList = await noteStore.findNotesMetadata(filter, offset, pageSize, spec);
+        const chunk = metaList.notes || [];
+        allMetas.push(...chunk);
+        offset += chunk.length;
+        if (offset >= (metaList.totalNotes || 0) || chunk.length === 0) {
+          break;
+        }
+      }
+
+      // Fetch note content:
+      // If note exists in knownNotes and updated timestamp matches (within 1s), mark notModified.
+      // Otherwise fetch full content using concurrent batches.
+      const concurrency = 5;
       const notes = [];
 
-      for (const meta of (metaList.notes || [])) {
-        try {
-          const fullNote = await noteStore.getNote(meta.guid, true, false, false, false);
-          notes.push({
-            guid: fullNote.guid,
-            title: fullNote.title || '无标题笔记',
-            content: enmlToMarkdown(fullNote.content),
-            updated: fullNote.updated,
-            created: fullNote.created,
-            notebookGuid: fullNote.notebookGuid
-          });
-        } catch (e) {
-          notes.push({
-            guid: meta.guid,
-            title: meta.title || '无标题笔记',
-            content: '',
-            updated: meta.updated,
-            created: meta.created,
-            notebookGuid: notebookGuid
-          });
-        }
+      for (let i = 0; i < allMetas.length; i += concurrency) {
+        const batch = allMetas.slice(i, i + concurrency);
+        const batchResults = await Promise.all(batch.map(async (meta) => {
+          const localUpdated = knownNotes[meta.guid];
+          const isUnchanged = (localUpdated !== undefined && Math.abs(localUpdated - meta.updated) < 1000);
+
+          if (isUnchanged) {
+            return {
+              guid: meta.guid,
+              title: meta.title || '无标题笔记',
+              content: null,
+              notModified: true,
+              updated: meta.updated,
+              created: meta.created,
+              notebookGuid: notebookGuid
+            };
+          }
+
+          try {
+            const fullNote = await noteStore.getNote(meta.guid, true, false, false, false);
+            return {
+              guid: fullNote.guid,
+              title: fullNote.title || '无标题笔记',
+              content: enmlToMarkdown(fullNote.content),
+              notModified: false,
+              updated: fullNote.updated,
+              created: fullNote.created,
+              notebookGuid: fullNote.notebookGuid
+            };
+          } catch (e) {
+            return {
+              guid: meta.guid,
+              title: meta.title || '无标题笔记',
+              content: null,
+              notModified: true, // Do not wipe local content on failure
+              fetchFailed: true,
+              updated: meta.updated,
+              created: meta.created,
+              notebookGuid: notebookGuid
+            };
+          }
+        }));
+        notes.push(...batchResults);
       }
 
       return {
@@ -254,16 +326,34 @@ async function handleAction(action, args) {
       const note = new Evernote.Types.Note();
       note.title = (title || '无标题笔记').slice(0, 255);
       note.content = markdownToEnml(content || '');
-      if (notebookGuid) {
+      if (isValidGuid(notebookGuid)) {
         note.notebookGuid = notebookGuid;
       }
 
       let result;
-      // If guid is a 36-char Evernote GUID
-      if (guid && /^[0-9a-fA-F-]{32,36}$/.test(guid)) {
-        note.guid = guid;
-        result = await noteStore.updateNote(note);
-      } else {
+      let shouldCreate = true;
+      // If guid looks like a valid Evernote GUID, try updating first
+      if (isValidGuid(guid)) {
+        try {
+          note.guid = guid.toLowerCase();
+          result = await noteStore.updateNote(note);
+          shouldCreate = false;
+        } catch (err) {
+          // If note not found or guid rejected on server, fallback to creating note
+          const isNoteGuidError = (err.errorCode === 2 && err.parameter === 'Note.guid') ||
+                                  err.identifier === 'Note.guid' ||
+                                  (err.name && err.name.includes('NotFound'));
+          if (isNoteGuidError) {
+            delete note.guid;
+            shouldCreate = true;
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      if (shouldCreate) {
+        delete note.guid;
         result = await noteStore.createNote(note);
       }
 
@@ -282,8 +372,18 @@ async function handleAction(action, args) {
     case 'delete-note': {
       const noteStore = client.getNoteStore();
       const { guid } = args;
-      if (!guid) throw new Error('Note guid is required');
-      await noteStore.deleteNote(guid);
+      if (!guid || !isValidGuid(guid)) {
+        return { success: true, guid: guid };
+      }
+      try {
+        await noteStore.deleteNote(guid.toLowerCase());
+      } catch (err) {
+        const isNotFound = err.identifier === 'Note.guid' || (err.name && err.name.includes('NotFound'));
+        if (isNotFound) {
+          return { success: true, guid: guid };
+        }
+        throw err;
+      }
       return { success: true, guid: guid };
     }
 

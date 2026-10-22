@@ -47,8 +47,10 @@ class StorageManager {
     }
 
     func loadData() -> (notebooks: [Notebook], notes: [Note]) {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: dataFileURL),
-              let stored = try? JSONDecoder().decode(StoredData.self, from: data) else {
+              let stored = try? decoder.decode(StoredData.self, from: data) else {
             // First time initialization with sample data
             let initial = generateInitialData()
             saveData(notebooks: initial.notebooks, notes: initial.notes)

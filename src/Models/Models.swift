@@ -77,6 +77,7 @@ struct Note: Codable, Identifiable, Hashable {
     var color: NoteColor
     var isPinned: Bool
     var isDirty: Bool // local changes pending sync
+    var notModified: Bool? = false
 
     init(
         guid: String = UUID().uuidString,
@@ -86,7 +87,8 @@ struct Note: Codable, Identifiable, Hashable {
         updatedAt: Date = Date(),
         color: NoteColor = .gray,
         isPinned: Bool = false,
-        isDirty: Bool = false
+        isDirty: Bool = false,
+        notModified: Bool? = false
     ) {
         self.guid = guid
         self.title = title
@@ -96,6 +98,7 @@ struct Note: Codable, Identifiable, Hashable {
         self.color = color
         self.isPinned = isPinned
         self.isDirty = isDirty
+        self.notModified = notModified
     }
 }
 

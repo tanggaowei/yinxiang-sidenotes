@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SideNotesView: View {
-    @StateObject var viewModel = NoteViewModel()
+    @ObservedObject var viewModel: NoteViewModel
     @ObservedObject var windowManager = WindowManager.shared
 
     @State private var showingCreateNotebookAlert = false

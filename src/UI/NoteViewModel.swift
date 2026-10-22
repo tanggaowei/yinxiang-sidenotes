@@ -42,6 +42,15 @@ class NoteViewModel: ObservableObject {
         } else {
             self.currentNotebook = notebooks.first
         }
+
+        // Migrate local placeholder notebook GUIDs if needed
+        if let current = currentNotebook, current.guid != "default-sidenotes-nb", current.name == "SideNotes" {
+            for i in 0..<self.allNotes.count {
+                if self.allNotes[i].notebookGuid == "default-sidenotes-nb" {
+                    self.allNotes[i].notebookGuid = current.guid
+                }
+            }
+        }
     }
 
     func saveLocalData() {
@@ -87,7 +96,8 @@ class NoteViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         // Local creation
-        let newNb = Notebook(guid: UUID().uuidString, name: trimmed, isDefault: false)
+        let tempGuid = UUID().uuidString
+        let newNb = Notebook(guid: tempGuid, name: trimmed, isDefault: false)
         self.notebooks.append(newNb)
         self.selectNotebook(newNb)
         self.saveLocalData()
@@ -102,10 +112,19 @@ class NoteViewModel: ObservableObject {
                         name: trimmed
                     )
                     await MainActor.run {
-                        if let idx = self.notebooks.firstIndex(where: { $0.id == newNb.id }) {
+                        if let idx = self.notebooks.firstIndex(where: { $0.id == tempGuid }) {
                             self.notebooks[idx] = cloudNb
-                            if self.currentNotebook?.id == newNb.id {
+                            if self.currentNotebook?.guid == tempGuid {
                                 self.currentNotebook = cloudNb
+                                self.settings.selectedNotebookGuid = cloudNb.guid
+                                self.storage.saveSettings(self.settings)
+                            }
+                            // Migrate any notes that were assigned to tempGuid
+                            for nIdx in 0..<self.allNotes.count {
+                                if self.allNotes[nIdx].notebookGuid == tempGuid {
+                                    self.allNotes[nIdx].notebookGuid = cloudNb.guid
+                                    self.allNotes[nIdx].isDirty = true
+                                }
                             }
                             self.saveLocalData()
                         }
@@ -234,13 +253,6 @@ class NoteViewModel: ObservableObject {
                     china: settings.serviceType.isChina
                 )
 
-                await MainActor.run {
-                    self.syncState = .syncing(message: "同步笔记本列表...")
-                    if !cloudNotebooks.isEmpty {
-                        self.notebooks = cloudNotebooks
-                    }
-                }
-
                 // 2. Ensure default "SideNotes" notebook exists
                 let sideNotesNb = try await syncEngine.getOrCreateDefaultNotebook(
                     token: settings.evernoteToken,
@@ -248,43 +260,103 @@ class NoteViewModel: ObservableObject {
                     name: "SideNotes"
                 )
 
-                await MainActor.run {
-                    if !self.notebooks.contains(where: { $0.guid == sideNotesNb.guid }) {
-                        self.notebooks.append(sideNotesNb)
+                // 3. Resolve active notebook and migrate local placeholder notebook GUIDs
+                let targetNbGuid: String = await MainActor.run {
+                    var mergedNotebooks = cloudNotebooks
+                    if !mergedNotebooks.contains(where: { $0.guid == sideNotesNb.guid }) {
+                        mergedNotebooks.insert(sideNotesNb, at: 0)
                     }
-                    if self.currentNotebook == nil {
-                        self.currentNotebook = sideNotesNb
+                    self.notebooks = mergedNotebooks
+
+                    let oldCurrent = self.currentNotebook
+                    let isOldLocalGuid = oldCurrent?.guid.contains("default-") == true ||
+                                         oldCurrent?.guid.contains("-nb") == true
+
+                    if let oldCurrent = oldCurrent,
+                       let matched = mergedNotebooks.first(where: { $0.guid == oldCurrent.guid }) {
+                        self.currentNotebook = matched
+                    } else if let oldCurrent = oldCurrent,
+                              let matchedByName = mergedNotebooks.first(where: { $0.name == oldCurrent.name }) {
+                        // Map local placeholder (e.g. "SideNotes" or "工作待办") to matching cloud notebook
+                        self.currentNotebook = matchedByName
+                    } else if let sideNotesMatch = mergedNotebooks.first(where: { $0.guid == sideNotesNb.guid }) {
+                        self.currentNotebook = sideNotesMatch
+                    } else if let def = mergedNotebooks.first(where: { $0.isDefault }) {
+                        self.currentNotebook = def
+                    } else {
+                        self.currentNotebook = mergedNotebooks.first
+                    }
+
+                    if let current = self.currentNotebook {
+                        self.settings.selectedNotebookGuid = current.guid
+                        self.storage.saveSettings(self.settings)
+
+                        // If migrating from local placeholder guid (e.g. "default-sidenotes-nb"),
+                        // update notebookGuid on all existing local notes so they stay with this notebook
+                        if let oldGuid = oldCurrent?.guid, oldGuid != current.guid, isOldLocalGuid {
+                            for idx in 0..<self.allNotes.count {
+                                if self.allNotes[idx].notebookGuid == oldGuid {
+                                    self.allNotes[idx].notebookGuid = current.guid
+                                    self.allNotes[idx].isDirty = true
+                                }
+                            }
+                        }
+                    }
+
+                    return self.currentNotebook?.guid ?? sideNotesNb.guid
+                }
+
+                // 4. Upload any local dirty notes for this notebook
+                let dirtyNotes = await MainActor.run {
+                    self.allNotes.filter { $0.notebookGuid == targetNbGuid && $0.isDirty }
+                }
+
+                for note in dirtyNotes {
+                    do {
+                        let saved = try await syncEngine.saveNote(
+                            token: settings.evernoteToken,
+                            china: settings.serviceType.isChina,
+                            note: note
+                        )
+                        await MainActor.run {
+                            if let idx = self.allNotes.firstIndex(where: { $0.id == note.id }) {
+                                self.allNotes[idx].guid = saved.guid
+                                self.allNotes[idx].updatedAt = saved.updated
+                                self.allNotes[idx].isDirty = false
+                                if self.selectedNote?.id == note.id {
+                                    self.selectedNote = self.allNotes[idx]
+                                }
+                            }
+                        }
+                    } catch {
+                        print("Failed to sync local note to cloud: \(error)")
                     }
                 }
 
-                // 3. Fetch notes for current notebook
-                let targetNbGuid = await MainActor.run { self.currentNotebook?.guid ?? sideNotesNb.guid }
+                // 5. Fetch notes from cloud for current notebook
+                let knownNotes = await MainActor.run {
+                    Dictionary(
+                        self.allNotes.filter { $0.notebookGuid == targetNbGuid && !$0.isDirty }
+                            .map { ($0.guid, $0.updatedAt.timeIntervalSince1970 * 1000.0) },
+                        uniquingKeysWith: { first, _ in first }
+                    )
+                }
+
                 let cloudNotes = try await syncEngine.fetchNotes(
                     token: settings.evernoteToken,
                     china: settings.serviceType.isChina,
-                    notebookGuid: targetNbGuid
+                    notebookGuid: targetNbGuid,
+                    knownNotes: knownNotes
                 )
 
                 await MainActor.run {
-                    // Merge cloud notes into local notes
-                    for cn in cloudNotes {
-                        if let idx = self.allNotes.firstIndex(where: { $0.guid == cn.guid }) {
-                            // Preserve local color and pin if already set
-                            var updated = cn
-                            updated.color = self.allNotes[idx].color
-                            updated.isPinned = self.allNotes[idx].isPinned
-                            self.allNotes[idx] = updated
-                        } else {
-                            self.allNotes.append(cn)
-                        }
-                    }
-                    self.saveLocalData()
-                    self.syncState = .success(message: "同步成功 (\(cloudNotes.count)条笔记)")
+                    self.applyCloudSync(cloudNotes: cloudNotes, notebookGuid: targetNbGuid)
+                    self.syncState = .success(message: "同步成功 (\(cloudNotes.count)条云端笔记)")
 
                     // Reset sync state after 3 seconds
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        if case .success = self.syncState {
-                            self.syncState = .idle
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                        if case .success = self?.syncState {
+                            self?.syncState = .idle
                         }
                     }
                 }
@@ -299,30 +371,58 @@ class NoteViewModel: ObservableObject {
     private func syncNotesForCurrentNotebook() {
         guard let current = currentNotebook, !settings.evernoteToken.isEmpty else { return }
 
-        self.syncState = .syncing(message: "拉取笔记...")
+        // If current notebook is still a local placeholder, run full sync instead
+        if current.guid.contains("default-") || current.guid.contains("-nb") {
+            syncWithYinxiang()
+            return
+        }
+
+        self.syncState = .syncing(message: "正在拉取笔记...")
         Task {
             do {
+                // Upload any dirty notes first
+                let dirtyNotes = await MainActor.run {
+                    self.allNotes.filter { $0.notebookGuid == current.guid && $0.isDirty }
+                }
+                for note in dirtyNotes {
+                    if let saved = try? await syncEngine.saveNote(
+                        token: settings.evernoteToken,
+                        china: settings.serviceType.isChina,
+                        note: note
+                    ) {
+                        await MainActor.run {
+                            if let idx = self.allNotes.firstIndex(where: { $0.id == note.id }) {
+                                self.allNotes[idx].guid = saved.guid
+                                self.allNotes[idx].updatedAt = saved.updated
+                                self.allNotes[idx].isDirty = false
+                                if self.selectedNote?.id == note.id {
+                                    self.selectedNote = self.allNotes[idx]
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let knownNotes = await MainActor.run {
+                    Dictionary(
+                        self.allNotes.filter { $0.notebookGuid == current.guid && !$0.isDirty }
+                            .map { ($0.guid, $0.updatedAt.timeIntervalSince1970 * 1000.0) },
+                        uniquingKeysWith: { first, _ in first }
+                    )
+                }
+
                 let cloudNotes = try await syncEngine.fetchNotes(
                     token: settings.evernoteToken,
                     china: settings.serviceType.isChina,
-                    notebookGuid: current.guid
+                    notebookGuid: current.guid,
+                    knownNotes: knownNotes
                 )
                 await MainActor.run {
-                    for cn in cloudNotes {
-                        if let idx = self.allNotes.firstIndex(where: { $0.guid == cn.guid }) {
-                            var updated = cn
-                            updated.color = self.allNotes[idx].color
-                            updated.isPinned = self.allNotes[idx].isPinned
-                            self.allNotes[idx] = updated
-                        } else {
-                            self.allNotes.append(cn)
-                        }
-                    }
-                    self.saveLocalData()
+                    self.applyCloudSync(cloudNotes: cloudNotes, notebookGuid: current.guid)
                     self.syncState = .success(message: "已同步最新笔记")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                        if case .success = self.syncState {
-                            self.syncState = .idle
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                        if case .success = self?.syncState {
+                            self?.syncState = .idle
                         }
                     }
                 }
@@ -332,6 +432,56 @@ class NoteViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // Merge cloud notes into local storage and remove notes deleted in cloud
+    @MainActor
+    private func applyCloudSync(cloudNotes: [Note], notebookGuid: String) {
+        let cloudGuids = Set(cloudNotes.map { $0.guid })
+
+        // 1. Remove local notes that were deleted in cloud:
+        // (Must belong to this notebook, not be marked dirty with unsynced local edits, and absent from cloud)
+        self.allNotes.removeAll { localNote in
+            if localNote.notebookGuid == notebookGuid && !localNote.isDirty && !cloudGuids.contains(localNote.guid) {
+                return true
+            }
+            return false
+        }
+
+        // 2. Deselect note if it was deleted
+        if let sel = self.selectedNote,
+           sel.notebookGuid == notebookGuid && !sel.isDirty && !cloudGuids.contains(sel.guid) {
+            self.selectedNote = nil
+        }
+
+        // 3. Update existing notes or append new notes
+        for cn in cloudNotes {
+            if let idx = self.allNotes.firstIndex(where: { $0.guid == cn.guid }) {
+                // If local note has unsaved changes, do not overwrite local content
+                if !self.allNotes[idx].isDirty {
+                    var updated = self.allNotes[idx]
+                    updated.title = cn.title
+                    updated.updatedAt = cn.updatedAt
+                    updated.notebookGuid = cn.notebookGuid
+                    // Only update content if cloud note was fetched/modified
+                    if cn.notModified != true {
+                        updated.content = cn.content
+                    }
+                    self.allNotes[idx] = updated
+                }
+            } else {
+                // Brand new note from cloud
+                self.allNotes.append(cn)
+            }
+        }
+
+        // 4. If current selected note was updated, keep selectedNote in sync
+        if let sel = self.selectedNote,
+           let updatedSelected = self.allNotes.first(where: { $0.id == sel.id }) {
+            self.selectedNote = updatedSelected
+        }
+
+        self.saveLocalData()
     }
 
     func saveSettings(_ newSettings: AppSettings) {
