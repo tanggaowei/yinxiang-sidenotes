@@ -16,8 +16,8 @@ class WindowManager: NSObject, ObservableObject {
     private var globalClickMonitor: Any?
 
     private let panelWidth: CGFloat = 360
-    private let tabWidth: CGFloat = 20
-    private let tabHeight: CGFloat = 84
+    private let tabWidth: CGFloat = 8
+    private let tabHeight: CGFloat = 50
 
     private override init() {
         super.init()

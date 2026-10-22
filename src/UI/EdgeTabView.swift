@@ -9,36 +9,26 @@ struct EdgeTabView: View {
     var body: some View {
         Button(action: onClick) {
             ZStack {
-                // Background shape with rounded corners on inner edge
-                CustomEdgeShape(dockSide: dockSide, radius: 10)
-                    .fill(Color(NSColor.controlBackgroundColor).opacity(isHovered ? 0.95 : 0.82))
+                // Sleek minimalist handle without any icons
+                CustomEdgeShape(dockSide: dockSide, radius: 4)
+                    .fill(Color(NSColor.labelColor).opacity(isHovered ? 0.45 : 0.22))
                     .overlay(
-                        CustomEdgeShape(dockSide: dockSide, radius: 10)
-                            .stroke(Color.primary.opacity(isHovered ? 0.25 : 0.12), lineWidth: 1)
+                        CustomEdgeShape(dockSide: dockSide, radius: 4)
+                            .stroke(Color.white.opacity(isHovered ? 0.35 : 0.12), lineWidth: 0.5)
                     )
                     .shadow(
-                        color: Color.black.opacity(isHovered ? 0.18 : 0.08),
-                        radius: isHovered ? 5 : 3,
-                        x: dockSide == .right ? -2 : 2,
-                        y: 1
+                        color: Color.black.opacity(isHovered ? 0.2 : 0.08),
+                        radius: isHovered ? 3 : 1.5,
+                        x: dockSide == .right ? -1 : 1,
+                        y: 0
                     )
-
-                VStack(spacing: 5) {
-                    Image(systemName: dockSide == .right ? "chevron.left" : "chevron.right")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(isHovered ? .blue : .primary.opacity(0.75))
-
-                    Image(systemName: "note.text")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(isHovered ? .blue : .secondary)
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+            withAnimation(.easeInOut(duration: 0.12)) {
                 isHovered = hovering
             }
             if hovering {
