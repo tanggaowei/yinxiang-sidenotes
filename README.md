@@ -1,8 +1,21 @@
 # 印象笔记 SideNotes (Yinxiang SideNotes for macOS)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/tanggaowei/yinxiang-sidenotes)](https://github.com/tanggaowei/yinxiang-sidenotes/releases/latest)
+[![Platform](https://img.shields.io/badge/Platform-macOS%2013%2B-lightgrey.svg)](https://github.com/tanggaowei/yinxiang-sidenotes)
+
 仿造 macOS 顶级效率神器 **SideNotes**，打造基于 **印象笔记（Yinxiang Biji）/ Evernote** 的屏幕边缘悬浮笔记应用。
 
 > 拒绝 Electron 臃肿！全面采用 **macOS 原生（Swift / SwiftUI + AppKit）超轻架构**，应用体积仅 **1.5 MB**，待机内存仅 **~30 MB**，毫秒级快速启动，带来 120Hz 丝滑交互与原生毛玻璃视效！
+
+---
+
+## 📥 快速下载安装
+
+直接从 [GitHub Releases 最新版本](https://github.com/tanggaowei/yinxiang-sidenotes/releases/latest) 下载：
+
+- **[YinxiangSideNotes-v1.0.0.dmg](https://github.com/tanggaowei/yinxiang-sidenotes/releases/download/v1.0.0/YinxiangSideNotes-v1.0.0.dmg)**（推荐）：下载双击打开，将应用图标拖拽至 `Applications` 目录即可使用。
+- **[YinxiangSideNotes-v1.0.0-macOS.zip](https://github.com/tanggaowei/yinxiang-sidenotes/releases/download/v1.0.0/YinxiangSideNotes-v1.0.0-macOS.zip)**：解压后双击直接运行。
 
 ---
 
@@ -98,3 +111,10 @@ yinxiang-sidenotes/
 │   └── build.sh                    # 原生编译打包脚本
 └── Makefile
 ```
+
+---
+
+## 📄 开源协议 (License)
+
+本项目遵循 [MIT License](LICENSE) 开源协议。欢迎提交 PR、Issue 与 Star 🌟 支持！
+
