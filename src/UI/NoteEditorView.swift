@@ -11,7 +11,6 @@ struct NoteEditorView: View {
     @State private var currentColor: NoteColor = .gray
     @State private var isPinned: Bool = false
     @State private var showCopiedAlert = false
-    @FocusState private var isContentFocused: Bool
 
     private var lineCount: Int {
         content.isEmpty ? 0 : content.components(separatedBy: .newlines).count
@@ -162,18 +161,15 @@ struct NoteEditorView: View {
                 .padding(.bottom, 4)
             }
 
-            // MARK: - Markdown Body Editor
-            TextEditor(text: $content)
-                .font(.system(size: 13.5, weight: .regular, design: .default))
-                .lineSpacing(5)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .scrollContentBackground(.hidden)
-                .focused($isContentFocused)
-                .onChange(of: content) {
+            // MARK: - Notion-Style Live Rich Markdown Editor
+            RichMarkdownEditor(
+                text: $content,
+                noteColor: currentColor,
+                onTextChange: {
                     saveCurrentNote()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
                 .opacity(0.35)
@@ -240,13 +236,11 @@ struct NoteEditorView: View {
     private func insertPrefix(_ text: String) {
         content.append(text)
         saveCurrentNote()
-        isContentFocused = true
     }
 
     private func wrapSelection(prefix: String, suffix: String, placeholder: String) {
         content.append("\(prefix)\(placeholder)\(suffix)")
         saveCurrentNote()
-        isContentFocused = true
     }
 
     private func copyContentToClipboard() {
