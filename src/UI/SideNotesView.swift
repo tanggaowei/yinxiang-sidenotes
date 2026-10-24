@@ -17,13 +17,17 @@ struct SideNotesView: View {
                         set: { viewModel.updateNote($0) }
                     ),
                     onBack: {
-                        viewModel.selectedNote = nil
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                            viewModel.selectedNote = nil
+                        }
                     },
                     onUpdate: { updated in
                         viewModel.updateNote(updated)
                     },
                     onDelete: {
-                        viewModel.deleteNote(selected)
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                            viewModel.deleteNote(selected)
+                        }
                     }
                 )
                 .transition(.asymmetric(
@@ -36,7 +40,7 @@ struct SideNotesView: View {
                     // 1. Top Bar
                     topBar
 
-                    Divider().opacity(0.4)
+                    Divider().opacity(0.35)
 
                     // 2. Search & Filter Bar
                     searchBar
@@ -58,7 +62,7 @@ struct SideNotesView: View {
         .sheet(isPresented: $showingCreateNotebookAlert) {
             createNotebookSheet
         }
-        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: viewModel.selectedNote?.id)
+        .animation(.spring(response: 0.26, dampingFraction: 0.85), value: viewModel.selectedNote?.id)
     }
 
     // MARK: - Top Toolbar
@@ -66,7 +70,7 @@ struct SideNotesView: View {
         HStack(spacing: 6) {
             // Notebook Picker Menu
             Menu {
-                Section("所有笔记本") {
+                Section("印象笔记笔记本") {
                     ForEach(viewModel.notebooks) { nb in
                         Button(action: {
                             viewModel.selectNotebook(nb)
@@ -90,110 +94,135 @@ struct SideNotesView: View {
                     Label("新建笔记本...", systemImage: "folder.badge.plus")
                 }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 11))
-                        .foregroundColor(.blue)
+                        .foregroundColor(.accentColor)
 
                     Text(viewModel.currentNotebook?.name ?? "SideNotes")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .lineLimit(1)
 
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 9))
+                    Text("(\(viewModel.filteredNotes.count))")
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.secondary)
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.secondary.opacity(0.8))
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
-                .cornerRadius(6)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Color.primary.opacity(0.06))
+                .cornerRadius(8)
             }
             .menuStyle(BorderlessButtonMenuStyle())
 
             Spacer()
 
-            // Sync Button
-            Button(action: {
-                viewModel.syncWithYinxiang()
-            }) {
-                syncIcon
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(BorderlessButtonStyle())
-            .help("同步印象笔记")
+            // Header Action Buttons
+            HStack(spacing: 3) {
+                // Sync Button
+                IconButton(
+                    icon: syncIconName,
+                    tooltip: "立即同步印象笔记",
+                    isActive: false,
+                    isSpinning: isSyncing
+                ) {
+                    viewModel.syncWithYinxiang()
+                }
 
-            // Dock Side Toggle
-            Button(action: {
-                let nextSide: DockSide = (windowManager.dockSide == .right) ? .left : .right
-                windowManager.setDockSide(nextSide)
-                var s = viewModel.settings
-                s.dockSide = nextSide
-                viewModel.saveSettings(s)
-            }) {
-                Image(systemName: windowManager.dockSide == .right ? "sidebar.right" : "sidebar.left")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(BorderlessButtonStyle())
-            .help(windowManager.dockSide == .right ? "当前停靠右侧 (点击切换到左侧)" : "当前停靠左侧 (点击切换到右侧)")
+                // Dock Side Toggle
+                IconButton(
+                    icon: windowManager.dockSide == .right ? "sidebar.right" : "sidebar.left",
+                    tooltip: windowManager.dockSide == .right ? "切换停靠到屏幕左侧" : "切换停靠到屏幕右侧",
+                    isActive: false
+                ) {
+                    let nextSide: DockSide = (windowManager.dockSide == .right) ? .left : .right
+                    windowManager.setDockSide(nextSide)
+                    var s = viewModel.settings
+                    s.dockSide = nextSide
+                    viewModel.saveSettings(s)
+                }
 
-            // Pin Button
-            Button(action: {
-                let nextPinned = !windowManager.isPinned
-                windowManager.setPinned(nextPinned)
-                var s = viewModel.settings
-                s.isPinned = nextPinned
-                viewModel.saveSettings(s)
-            }) {
-                Image(systemName: windowManager.isPinned ? "pin.fill" : "pin")
-                    .font(.system(size: 12))
-                    .foregroundColor(windowManager.isPinned ? .orange : .secondary)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(BorderlessButtonStyle())
-            .help(windowManager.isPinned ? "已置顶 (窗口保持常驻)" : "未置顶 (失焦自动收起)")
+                // Pin Button
+                IconButton(
+                    icon: windowManager.isPinned ? "pin.fill" : "pin",
+                    tooltip: windowManager.isPinned ? "已置顶 (点击解除)" : "点击置顶窗口",
+                    isActive: windowManager.isPinned,
+                    activeColor: .orange
+                ) {
+                    let nextPinned = !windowManager.isPinned
+                    windowManager.setPinned(nextPinned)
+                    var s = viewModel.settings
+                    s.isPinned = nextPinned
+                    viewModel.saveSettings(s)
+                }
 
-            // Settings Button
-            Button(action: {
-                viewModel.isSettingsOpen = true
-            }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .frame(width: 24, height: 24)
+                // Settings Button
+                IconButton(
+                    icon: "gearshape",
+                    tooltip: "偏好设置",
+                    isActive: false
+                ) {
+                    viewModel.isSettingsOpen = true
+                }
             }
-            .buttonStyle(BorderlessButtonStyle())
-            .help("偏好设置")
 
-            // New Note Button
+            // New Note Button (Distinct Accent Pill)
             Button(action: {
-                withAnimation {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                     viewModel.createNewNote()
                 }
             }) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 15))
-                    .foregroundColor(.blue)
-                    .frame(width: 24, height: 24)
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("便签")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(nsColor: .dynamic(light: 0x1E293B, dark: 0x38BDF8)))
+                )
+                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
             }
-            .buttonStyle(BorderlessButtonStyle())
-            .help("新建笔记")
+            .buttonStyle(PlainButtonStyle())
+            .help("新建便签 (⌘N)")
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    }
+
+    private var isSyncing: Bool {
+        if case .syncing = viewModel.syncState { return true }
+        return false
+    }
+
+    private var syncIconName: String {
+        switch viewModel.syncState {
+        case .syncing:
+            return "arrow.triangle.2.circlepath"
+        case .failed:
+            return "exclamationmark.icloud"
+        case .success:
+            return "checkmark.icloud"
+        case .idle, .offline:
+            return "arrow.triangle.2.circlepath"
+        }
     }
 
     // MARK: - Search Bar
     private var searchBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
 
-            TextField("搜索笔记标题或内容...", text: $viewModel.searchQuery)
+            TextField("搜索便签标题或内容...", text: $viewModel.searchQuery)
                 .font(.system(size: 12))
                 .textFieldStyle(PlainTextFieldStyle())
 
@@ -203,14 +232,14 @@ struct SideNotesView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
-                .buttonStyle(BorderlessButtonStyle())
+                .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-        .cornerRadius(6)
-        .padding(.horizontal, 12)
+        .background(Color.primary.opacity(0.04))
+        .cornerRadius(8)
+        .padding(.horizontal, 14)
         .padding(.vertical, 6)
     }
 
@@ -220,15 +249,16 @@ struct SideNotesView: View {
         switch viewModel.syncState {
         case .syncing(let msg):
             HStack(spacing: 6) {
-                ProgressView().scaleEffect(0.5)
+                ProgressView().scaleEffect(0.55)
                 Text(msg)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer()
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .background(Color.blue.opacity(0.1))
+            .padding(.vertical, 5)
+            .background(Color.blue.opacity(0.08))
+            .transition(.move(edge: .top).combined(with: .opacity))
         case .failed(let err):
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.circle.fill")
@@ -241,8 +271,9 @@ struct SideNotesView: View {
                 Spacer()
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .background(Color.red.opacity(0.1))
+            .padding(.vertical, 5)
+            .background(Color.red.opacity(0.08))
+            .transition(.move(edge: .top).combined(with: .opacity))
         case .success(let msg):
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
@@ -254,8 +285,9 @@ struct SideNotesView: View {
                 Spacer()
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .background(Color.green.opacity(0.1))
+            .padding(.vertical, 5)
+            .background(Color.green.opacity(0.08))
+            .transition(.move(edge: .top).combined(with: .opacity))
         case .idle, .offline:
             EmptyView()
         }
@@ -264,37 +296,56 @@ struct SideNotesView: View {
     // MARK: - Cards Deck
     private var cardsList: some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: 9) {
                 let notes = viewModel.filteredNotes
 
                 if notes.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "note.text")
-                            .font(.system(size: 28))
-                            .foregroundColor(.secondary.opacity(0.6))
-                            .padding(.top, 40)
+                    VStack(spacing: 12) {
+                        Image(systemName: viewModel.searchQuery.isEmpty ? "note.text.badge.plus" : "magnifyingglass")
+                            .font(.system(size: 32))
+                            .foregroundColor(.secondary.opacity(0.4))
+                            .padding(.top, 50)
 
-                        Text(viewModel.searchQuery.isEmpty ? "暂无笔记，点击右上角 + 开始记录" : "未找到匹配的笔记")
-                            .font(.system(size: 12))
+                        Text(viewModel.searchQuery.isEmpty ? "当前笔记本尚无便签" : "未找到与「\(viewModel.searchQuery)」匹配的便签")
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.secondary)
+
+                        if viewModel.searchQuery.isEmpty {
+                            Button(action: {
+                                withAnimation {
+                                    viewModel.createNewNote()
+                                }
+                            }) {
+                                Text("新建第一条便签")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                                    .background(Color.accentColor)
+                                    .cornerRadius(7)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .padding(.top, 4)
+                        }
                     }
+                    .frame(maxWidth: .infinity)
                 } else {
                     ForEach(notes) { note in
                         NoteCardView(
                             note: note,
                             isSelected: viewModel.selectedNote?.id == note.id,
                             onSelect: {
-                                withAnimation {
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                                     viewModel.selectedNote = note
                                 }
                             },
                             onDelete: {
-                                withAnimation {
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                                     viewModel.deleteNote(note)
                                 }
                             },
                             onTogglePin: {
-                                withAnimation {
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                                     viewModel.togglePinNote(note)
                                 }
                             },
@@ -305,35 +356,18 @@ struct SideNotesView: View {
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-    }
-
-    @ViewBuilder
-    private var syncIcon: some View {
-        switch viewModel.syncState {
-        case .syncing:
-            ProgressView()
-                .scaleEffect(0.6)
-        case .failed:
-            Image(systemName: "exclamationmark.icloud.fill")
-                .foregroundColor(.red)
-        case .success:
-            Image(systemName: "checkmark.icloud.fill")
-                .foregroundColor(.green)
-        case .idle, .offline:
-            Image(systemName: "arrow.triangle.2.circlepath")
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
     }
 
     // MARK: - Create Notebook Sheet
     private var createNotebookSheet: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             Text("新建印象笔记笔记本")
-                .font(.system(size: 13, weight: .bold))
+                .font(.system(size: 14, weight: .semibold))
 
-            TextField("笔记本名称 (如: 随手记 / 灵感集)", text: $newNotebookInput)
+            TextField("笔记本名称 (如: 随手记 / 工作备忘)", text: $newNotebookInput)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
 
             HStack {
@@ -352,7 +386,35 @@ struct SideNotesView: View {
                 .disabled(newNotebookInput.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding(20)
-        .frame(width: 280)
+        .padding(22)
+        .frame(width: 290)
+    }
+}
+
+// MARK: - Reusable Icon Button
+struct IconButton: View {
+    let icon: String
+    let tooltip: String
+    let isActive: Bool
+    var activeColor: Color = .accentColor
+    var isSpinning: Bool = false
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(isActive ? activeColor : (isHovered ? .primary : .secondary))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isActive ? activeColor.opacity(0.12) : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { isHovered = $0 }
+        .help(tooltip)
     }
 }

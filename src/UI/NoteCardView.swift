@@ -9,6 +9,7 @@ struct NoteCardView: View {
     let onSetColor: (NoteColor) -> Void
 
     @State private var isHovered = false
+    @State private var showCopiedAlert = false
 
     private var formattedDate: String {
         let calendar = Calendar.current
@@ -20,46 +21,50 @@ struct NoteCardView: View {
             return "昨天"
         } else {
             let formatter = DateFormatter()
-            formatter.dateFormat = "MM-dd"
+            formatter.dateFormat = "MM/dd"
             return formatter.string(from: note.updatedAt)
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Header: Title & Pin/Date
-            HStack(alignment: .center) {
+        VStack(alignment: .leading, spacing: 7) {
+            // MARK: - Header (Pin, Title, Date)
+            HStack(alignment: .center, spacing: 6) {
                 if note.isPinned {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 10))
-                        .foregroundColor(note.color.accentColor)
+                        .font(.system(size: 9))
+                        .foregroundColor(.orange)
                 }
 
-                Text(note.title.isEmpty ? "无标题笔记" : note.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
+                Text(note.title.isEmpty ? "无标题便签" : note.title)
+                    .font(.system(size: 13, weight: .semibold, design: .default))
+                    .foregroundColor(note.title.isEmpty ? .secondary : .primary)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(formattedDate)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.8))
             }
 
-            // Body preview (first 2-3 lines)
-            if !note.content.isEmpty {
+            // MARK: - Body Preview
+            if !note.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(note.content)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundColor(.secondary)
                     .lineLimit(2)
                     .lineSpacing(2)
+            } else {
+                Text("点击记录内容...")
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.secondary.opacity(0.4))
             }
 
-            // Hover Action Bar
+            // MARK: - Hover Action Bar
             if isHovered {
-                HStack(spacing: 8) {
-                    // Color dots
+                HStack(spacing: 6) {
+                    // Quick Color Picker
                     HStack(spacing: 4) {
                         ForEach(NoteColor.allCases) { color in
                             Circle()
@@ -67,7 +72,7 @@ struct NoteCardView: View {
                                 .frame(width: 8, height: 8)
                                 .overlay(
                                     Circle()
-                                        .stroke(Color.primary.opacity(0.3), lineWidth: note.color == color ? 1.5 : 0)
+                                        .stroke(Color.primary.opacity(0.4), lineWidth: note.color == color ? 1.5 : 0)
                                 )
                                 .onTapGesture {
                                     onSetColor(color)
@@ -77,24 +82,44 @@ struct NoteCardView: View {
 
                     Spacer()
 
-                    // Pin Button
-                    Button(action: onTogglePin) {
-                        Image(systemName: note.isPinned ? "pin.slash" : "pin")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                    // Copy action
+                    Button(action: copyCardContent) {
+                        Image(systemName: showCopiedAlert ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10))
+                            .foregroundColor(showCopiedAlert ? .green : .secondary)
+                            .frame(width: 20, height: 20)
+                            .background(Color.primary.opacity(0.04))
+                            .clipShape(Circle())
                     }
-                    .buttonStyle(BorderlessButtonStyle())
+                    .buttonStyle(PlainButtonStyle())
+                    .help(showCopiedAlert ? "已拷贝" : "拷贝便签内容")
 
-                    // Delete Button
+                    // Pin action
+                    Button(action: onTogglePin) {
+                        Image(systemName: note.isPinned ? "pin.slash.fill" : "pin")
+                            .font(.system(size: 10))
+                            .foregroundColor(note.isPinned ? .orange : .secondary)
+                            .frame(width: 20, height: 20)
+                            .background(Color.primary.opacity(0.04))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .help(note.isPinned ? "取消置顶" : "置顶")
+
+                    // Delete action
                     Button(action: onDelete) {
                         Image(systemName: "trash")
-                            .font(.system(size: 11))
+                            .font(.system(size: 10))
                             .foregroundColor(.secondary)
+                            .frame(width: 20, height: 20)
+                            .background(Color.primary.opacity(0.04))
+                            .clipShape(Circle())
                     }
-                    .buttonStyle(BorderlessButtonStyle())
+                    .buttonStyle(PlainButtonStyle())
+                    .help("删除")
                 }
                 .padding(.top, 2)
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .padding(12)
@@ -104,11 +129,16 @@ struct NoteCardView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(
-                            isSelected ? note.color.accentColor : Color.primary.opacity(0.06),
+                            isSelected ? note.color.accentColor : note.color.cardBorder,
                             lineWidth: isSelected ? 1.5 : 1
                         )
                 )
-                .shadow(color: Color.black.opacity(isHovered ? 0.08 : 0.03), radius: isHovered ? 4 : 2, x: 0, y: 1)
+                .shadow(
+                    color: Color.black.opacity(isHovered ? 0.09 : 0.03),
+                    radius: isHovered ? 5 : 2,
+                    x: 0,
+                    y: isHovered ? 2 : 1
+                )
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -124,7 +154,11 @@ struct NoteCardView: View {
                 Label(note.isPinned ? "取消置顶" : "置顶笔记", systemImage: note.isPinned ? "pin.slash" : "pin")
             }
 
-            Menu("标记颜色") {
+            Button(action: copyCardContent) {
+                Label("拷贝内容", systemImage: "doc.on.doc")
+            }
+
+            Menu("便签色板") {
                 ForEach(NoteColor.allCases) { color in
                     Button(action: { onSetColor(color) }) {
                         Text(color.displayName)
@@ -135,7 +169,23 @@ struct NoteCardView: View {
             Divider()
 
             Button(role: .destructive, action: onDelete) {
-                Label("删除笔记", systemImage: "trash")
+                Label("删除便签", systemImage: "trash")
+            }
+        }
+    }
+
+    private func copyCardContent() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let full = note.title.isEmpty ? note.content : "\(note.title)\n\n\(note.content)"
+        pasteboard.setString(full, forType: .string)
+
+        withAnimation {
+            showCopiedAlert = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation {
+                self.showCopiedAlert = false
             }
         }
     }

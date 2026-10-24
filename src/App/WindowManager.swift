@@ -37,7 +37,7 @@ class WindowManager: NSObject, ObservableObject {
         // Visual effect background (Frosted glass)
         let visualEffect = NSVisualEffectView(frame: NSRect(origin: .zero, size: initialFrame.size))
         visualEffect.autoresizingMask = [.width, .height]
-        visualEffect.material = .underWindowBackground
+        visualEffect.material = .sidebar
         visualEffect.blendingMode = .behindWindow
         visualEffect.state = .active
         self.visualEffectView = visualEffect
@@ -98,7 +98,7 @@ class WindowManager: NSObject, ObservableObject {
 
     private func updateVisualEffectMask(dockSide: DockSide, view: NSVisualEffectView) {
         view.wantsLayer = true
-        view.layer?.cornerRadius = 14
+        view.layer?.cornerRadius = 16
         if #available(macOS 10.15, *) {
             if dockSide == .right {
                 // Round only top-left and bottom-left
@@ -108,6 +108,8 @@ class WindowManager: NSObject, ObservableObject {
                 view.layer?.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
             }
         }
+        view.layer?.borderWidth = 0.5
+        view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.2).cgColor
     }
 
     private func calculateFrame(dockSide: DockSide, isVisible: Bool, screenFrame: NSRect) -> NSRect {

@@ -1,47 +1,114 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Color Palette Helpers
+extension NSColor {
+    static func hex(_ hex: UInt32, alpha: CGFloat = 1.0) -> NSColor {
+        let r = CGFloat((hex >> 16) & 0xFF) / 255.0
+        let g = CGFloat((hex >> 8) & 0xFF) / 255.0
+        let b = CGFloat(hex & 0xFF) / 255.0
+        return NSColor(srgbRed: r, green: g, blue: b, alpha: alpha)
+    }
+
+    static func dynamic(light: UInt32, dark: UInt32, alpha: CGFloat = 1.0) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let hex = isDark ? dark : light
+            let r = CGFloat((hex >> 16) & 0xFF) / 255.0
+            let g = CGFloat((hex >> 8) & 0xFF) / 255.0
+            let b = CGFloat(hex & 0xFF) / 255.0
+            return NSColor(srgbRed: r, green: g, blue: b, alpha: alpha)
+        }
+    }
+}
+
 // MARK: - Note Color Theme
 enum NoteColor: String, Codable, CaseIterable, Identifiable {
     case gray = "gray"
-    case red = "red"
     case orange = "orange"
     case green = "green"
     case blue = "blue"
     case purple = "purple"
+    case red = "red"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .gray: return "默认灰"
-        case .red: return "珊瑚红"
-        case .orange: return "琥珀橙"
-        case .green: return "薄荷绿"
-        case .blue: return "海沫蓝"
-        case .purple: return "丁香紫"
+        case .gray: return "极简石墨"
+        case .orange: return "琥珀原纸"
+        case .green: return "鼠尾草绿"
+        case .blue: return "冰川晨蓝"
+        case .purple: return "丁香浅紫"
+        case .red: return "珊瑚柔粉"
         }
     }
 
     var accentColor: Color {
         switch self {
-        case .gray: return Color.secondary.opacity(0.6)
-        case .red: return Color.red.opacity(0.8)
-        case .orange: return Color.orange.opacity(0.85)
-        case .green: return Color.green.opacity(0.8)
-        case .blue: return Color.blue.opacity(0.85)
-        case .purple: return Color.purple.opacity(0.85)
+        case .gray:
+            return Color(nsColor: .dynamic(light: 0x64748B, dark: 0x94A3B8))
+        case .orange:
+            return Color(nsColor: .dynamic(light: 0xD97706, dark: 0xFBBF24))
+        case .green:
+            return Color(nsColor: .dynamic(light: 0x16A34A, dark: 0x4ADE80))
+        case .blue:
+            return Color(nsColor: .dynamic(light: 0x2563EB, dark: 0x60A5FA))
+        case .purple:
+            return Color(nsColor: .dynamic(light: 0x9333EA, dark: 0xC084FC))
+        case .red:
+            return Color(nsColor: .dynamic(light: 0xE11D48, dark: 0xFB7185))
         }
     }
 
     var cardBackground: Color {
         switch self {
-        case .gray: return Color(NSColor.controlBackgroundColor).opacity(0.65)
-        case .red: return Color.red.opacity(0.12)
-        case .orange: return Color.orange.opacity(0.12)
-        case .green: return Color.green.opacity(0.12)
-        case .blue: return Color.blue.opacity(0.12)
-        case .purple: return Color.purple.opacity(0.12)
+        case .gray:
+            return Color(nsColor: .dynamic(light: 0xF8F9FB, dark: 0x202227))
+        case .orange:
+            return Color(nsColor: .dynamic(light: 0xFFFDF7, dark: 0x26221B))
+        case .green:
+            return Color(nsColor: .dynamic(light: 0xF4FAF6, dark: 0x1B2520))
+        case .blue:
+            return Color(nsColor: .dynamic(light: 0xF3F8FD, dark: 0x1B2432))
+        case .purple:
+            return Color(nsColor: .dynamic(light: 0xF9F5FD, dark: 0x251D2E))
+        case .red:
+            return Color(nsColor: .dynamic(light: 0xFDF4F5, dark: 0x291C22))
+        }
+    }
+
+    var cardBorder: Color {
+        switch self {
+        case .gray:
+            return Color(nsColor: .dynamic(light: 0xE2E6ED, dark: 0x333842))
+        case .orange:
+            return Color(nsColor: .dynamic(light: 0xF4E4CA, dark: 0x453A2A))
+        case .green:
+            return Color(nsColor: .dynamic(light: 0xD7EEDB, dark: 0x2A4535))
+        case .blue:
+            return Color(nsColor: .dynamic(light: 0xD4E6FA, dark: 0x2B3F5B))
+        case .purple:
+            return Color(nsColor: .dynamic(light: 0xEBDDF9, dark: 0x442F5B))
+        case .red:
+            return Color(nsColor: .dynamic(light: 0xFBD9DE, dark: 0x4C2936))
+        }
+    }
+
+    var toolbarBackground: Color {
+        switch self {
+        case .gray:
+            return Color(nsColor: .dynamic(light: 0xF0F2F6, dark: 0x1A1C20, alpha: 0.9))
+        case .orange:
+            return Color(nsColor: .dynamic(light: 0xFBF3E4, dark: 0x201B14, alpha: 0.9))
+        case .green:
+            return Color(nsColor: .dynamic(light: 0xECF6EF, dark: 0x152019, alpha: 0.9))
+        case .blue:
+            return Color(nsColor: .dynamic(light: 0xEBF3FC, dark: 0x151E2B, alpha: 0.9))
+        case .purple:
+            return Color(nsColor: .dynamic(light: 0xF3EBFB, dark: 0x1F1627, alpha: 0.9))
+        case .red:
+            return Color(nsColor: .dynamic(light: 0xFBEBEF, dark: 0x23151B, alpha: 0.9))
         }
     }
 }
