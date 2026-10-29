@@ -214,19 +214,29 @@ class NoteViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 1_200_000_000) // 1.2s debounce
             guard !Task.isCancelled else { return }
 
+            // Retrieve the latest snapshot of this note before calling the cloud API
+            guard let latestNote = await MainActor.run(body: {
+                self.allNotes.first(where: { $0.id == note.id })
+            }) else { return }
+
             do {
                 let saved = try await syncEngine.saveNote(
                     token: settings.evernoteToken,
                     china: settings.serviceType.isChina,
-                    note: note
+                    note: latestNote
                 )
                 await MainActor.run {
-                    if let idx = self.allNotes.firstIndex(where: { $0.id == note.id }) {
+                    if let idx = self.allNotes.firstIndex(where: { $0.id == latestNote.id }) {
                         self.allNotes[idx].guid = saved.guid
                         self.allNotes[idx].updatedAt = saved.updated
                         self.allNotes[idx].isDirty = false
-                        if self.selectedNote?.id == note.id {
-                            self.selectedNote = self.allNotes[idx]
+
+                        // Update metadata of selectedNote without overwriting in-flight content
+                        if var sel = self.selectedNote, sel.id == latestNote.id {
+                            sel.guid = saved.guid
+                            sel.updatedAt = saved.updated
+                            sel.isDirty = false
+                            self.selectedNote = sel
                         }
                         self.saveLocalData()
                     }

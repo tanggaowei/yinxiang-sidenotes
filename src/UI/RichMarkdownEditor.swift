@@ -5,6 +5,7 @@ import AppKit
 struct RichMarkdownEditor: NSViewRepresentable {
     @Binding var text: String
     var noteColor: NoteColor
+    var noteId: String
     var onTextChange: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
@@ -51,7 +52,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
         context.coordinator.textView = textView
 
         // Initial text & formatting
-        context.coordinator.updateTextIfChanged(newText: text, noteColor: noteColor)
+        context.coordinator.updateTextIfChanged(newText: text, noteColor: noteColor, noteId: noteId)
 
         scrollView.documentView = textView
         return scrollView
@@ -60,7 +61,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard (nsView.documentView as? NotionStyleTextView) != nil else { return }
         context.coordinator.parent = self
-        context.coordinator.updateTextIfChanged(newText: text, noteColor: noteColor)
+        context.coordinator.updateTextIfChanged(newText: text, noteColor: noteColor, noteId: noteId)
     }
 
     // MARK: - Coordinator
@@ -68,25 +69,62 @@ struct RichMarkdownEditor: NSViewRepresentable {
         var parent: RichMarkdownEditor
         weak var textView: NotionStyleTextView?
         private var isFormatting = false
+        private var currentNoteId: String = ""
+        private var lastAppliedColor: NoteColor? = nil
 
         init(_ parent: RichMarkdownEditor) {
             self.parent = parent
         }
 
-        func updateTextIfChanged(newText: String, noteColor: NoteColor) {
+        func updateTextIfChanged(newText: String, noteColor: NoteColor, noteId: String) {
             guard let textView = textView else { return }
-            if textView.string != newText {
-                let selectedRanges = textView.selectedRanges
+
+            // 1. If note changed completely (switched to another note in list)
+            if currentNoteId != noteId {
+                currentNoteId = noteId
+                lastAppliedColor = noteColor
                 textView.string = newText
                 applyMarkdownStyles(textView: textView, noteColor: noteColor)
-                textView.selectedRanges = selectedRanges
-            } else {
+                return
+            }
+
+            // 2. CRITICAL: If IME (Pinyin/CJK) composition is in progress, NEVER touch textView!
+            if textView.hasMarkedText() {
+                return
+            }
+
+            // 3. If user is currently focused and typing in this editor, do NOT overwrite text
+            let isFocused = (textView.window?.firstResponder == textView)
+
+            if textView.string != newText {
+                if !isFocused {
+                    let selectedRanges = textView.selectedRanges
+                    textView.string = newText
+                    applyMarkdownStyles(textView: textView, noteColor: noteColor)
+                    textView.selectedRanges = selectedRanges
+                }
+            } else if lastAppliedColor != noteColor {
+                lastAppliedColor = noteColor
                 applyMarkdownStyles(textView: textView, noteColor: noteColor)
             }
         }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = textView, !isFormatting else { return }
+
+            // CRITICAL: If IME composition (Pinyin) is still underway, DO NOT format or sync yet!
+            // Formatting will strip marked text attributes and kill unfinished Pinyin.
+            if textView.hasMarkedText() {
+                return
+            }
+
+            handleTextCommitted(textView: textView)
+        }
+
+        func handleTextCommitted(textView: NotionStyleTextView) {
+            guard !isFormatting else { return }
+            if textView.hasMarkedText() { return }
+
             let updated = textView.string
             if parent.text != updated {
                 parent.text = updated
@@ -97,6 +135,9 @@ struct RichMarkdownEditor: NSViewRepresentable {
 
         // MARK: - Live Markdown Highlighting (Notion / Bear Style)
         func applyMarkdownStyles(textView: NotionStyleTextView, noteColor: NoteColor) {
+            // Guard against calling while user is in active IME composition
+            if textView.hasMarkedText() { return }
+
             guard let textStorage = textView.textStorage else { return }
             let text = textStorage.string
             let fullRange = NSRange(location: 0, length: (text as NSString).length)
@@ -266,8 +307,21 @@ struct RichMarkdownEditor: NSViewRepresentable {
     }
 }
 
-// MARK: - Notion-Style Custom NSTextView with Interactive Checkbox Click
+// MARK: - Notion-Style Custom NSTextView with Interactive Checkbox Click & IME Support
 class NotionStyleTextView: NSTextView {
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        super.insertText(string, replacementRange: replacementRange)
+        // Once text is committed from IME (marked text cleared), trigger styling
+        if !hasMarkedText() {
+            (delegate as? RichMarkdownEditor.Coordinator)?.handleTextCommitted(textView: self)
+        }
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        (delegate as? RichMarkdownEditor.Coordinator)?.handleTextCommitted(textView: self)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let clickPoint = convert(event.locationInWindow, from: nil)
         let charIndex = characterIndexForInsertion(at: clickPoint)

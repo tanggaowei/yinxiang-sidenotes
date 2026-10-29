@@ -165,6 +165,7 @@ struct NoteEditorView: View {
             RichMarkdownEditor(
                 text: $content,
                 noteColor: currentColor,
+                noteId: note.id,
                 onTextChange: {
                     saveCurrentNote()
                 }
