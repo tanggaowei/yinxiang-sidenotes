@@ -14,8 +14,8 @@
 
 直接从 [GitHub Releases 最新版本](https://github.com/tanggaowei/yinxiang-sidenotes/releases/latest) 下载：
 
-- **[YinxiangSideNotes-v1.1.0.dmg](https://github.com/tanggaowei/yinxiang-sidenotes/releases/download/v1.1.0/YinxiangSideNotes-v1.1.0.dmg)**（推荐）：下载双击打开，将应用图标拖拽至 `Applications` 目录即可使用。
-- **[YinxiangSideNotes-v1.1.0-macOS.zip](https://github.com/tanggaowei/yinxiang-sidenotes/releases/download/v1.1.0/YinxiangSideNotes-v1.1.0-macOS.zip)**：解压后双击直接运行。
+- **[YinxiangSideNotes-v1.1.1.dmg](https://github.com/tanggaowei/yinxiang-sidenotes/releases/download/v1.1.1/YinxiangSideNotes-v1.1.1.dmg)**（推荐）：下载双击打开，将应用图标拖拽至 `Applications` 目录即可使用。
+- **[YinxiangSideNotes-v1.1.1-macOS.zip](https://github.com/tanggaowei/yinxiang-sidenotes/releases/download/v1.1.1/YinxiangSideNotes-v1.1.1-macOS.zip)**：解压后双击直接运行。
 
 ---
 
