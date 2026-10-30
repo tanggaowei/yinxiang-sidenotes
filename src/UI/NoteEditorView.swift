@@ -11,6 +11,7 @@ struct NoteEditorView: View {
     @State private var currentColor: NoteColor = .gray
     @State private var isPinned: Bool = false
     @State private var showCopiedAlert = false
+    @State private var autoSaveWorkItem: DispatchWorkItem? = nil
 
     private var lineCount: Int {
         content.isEmpty ? 0 : content.components(separatedBy: .newlines).count
@@ -28,6 +29,7 @@ struct NoteEditorView: View {
             HStack(spacing: 6) {
                 // Back Button
                 Button(action: {
+                    autoSaveWorkItem?.cancel()
                     saveCurrentNote()
                     onBack()
                 }) {
@@ -138,7 +140,7 @@ struct NoteEditorView: View {
                     .padding(.top, 10)
                     .padding(.horizontal, 16)
                     .onChange(of: title) {
-                        saveCurrentNote()
+                        scheduleAutoSave()
                     }
 
                 // Subline metadata
@@ -167,7 +169,7 @@ struct NoteEditorView: View {
                 noteColor: currentColor,
                 noteId: note.id,
                 onTextChange: {
-                    saveCurrentNote()
+                    scheduleAutoSave()
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -231,6 +233,10 @@ struct NoteEditorView: View {
             self.currentColor = note.color
             self.isPinned = note.isPinned
         }
+        .onDisappear {
+            autoSaveWorkItem?.cancel()
+            saveCurrentNote()
+        }
     }
 
     // MARK: - Insertion Helpers
@@ -260,7 +266,17 @@ struct NoteEditorView: View {
         }
     }
 
+    private func scheduleAutoSave() {
+        autoSaveWorkItem?.cancel()
+        let item = DispatchWorkItem {
+            saveCurrentNote()
+        }
+        autoSaveWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
+    }
+
     private func saveCurrentNote() {
+        autoSaveWorkItem?.cancel()
         var updated = note
         updated.title = title
         updated.content = content

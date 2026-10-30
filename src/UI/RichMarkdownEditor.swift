@@ -45,6 +45,17 @@ struct RichMarkdownEditor: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
 
+        // Base typing attributes to ensure new text inherits correct font & paragraph style
+        let baseFont = NSFont.systemFont(ofSize: 13.5, weight: .regular)
+        let baseParagraph = NSMutableParagraphStyle()
+        baseParagraph.lineSpacing = 5
+        baseParagraph.paragraphSpacing = 4
+        textView.typingAttributes = [
+            .font: baseFont,
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: baseParagraph
+        ]
+
         // Insets
         textView.textContainerInset = NSSize(width: 12, height: 8)
 
@@ -71,6 +82,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
         private var isFormatting = false
         private var currentNoteId: String = ""
         private var lastAppliedColor: NoteColor? = nil
+        private var formatWorkItem: DispatchWorkItem?
 
         init(_ parent: RichMarkdownEditor) {
             self.parent = parent
@@ -81,6 +93,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
 
             // 1. If note changed completely (switched to another note in list)
             if currentNoteId != noteId {
+                formatWorkItem?.cancel()
                 currentNoteId = noteId
                 lastAppliedColor = noteColor
                 textView.string = newText
@@ -98,6 +111,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
 
             if textView.string != newText {
                 if !isFocused {
+                    formatWorkItem?.cancel()
                     let selectedRanges = textView.selectedRanges
                     textView.string = newText
                     applyMarkdownStyles(textView: textView, noteColor: noteColor)
@@ -130,10 +144,19 @@ struct RichMarkdownEditor: NSViewRepresentable {
                 parent.text = updated
                 parent.onTextChange?()
             }
-            applyMarkdownStyles(textView: textView, noteColor: parent.noteColor)
+
+            // Debounce markdown styling (50ms) to allow IME window closure and caret positioning
+            // to settle smoothly without frame tearing or flickering
+            formatWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self, weak textView] in
+                guard let self = self, let textView = textView else { return }
+                self.applyMarkdownStyles(textView: textView, noteColor: self.parent.noteColor)
+            }
+            formatWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
         }
 
-        // MARK: - Live Markdown Highlighting (Notion / Bear Style)
+        // MARK: - Live Markdown Highlighting (Notion / Bear Style) with Differential Updates
         func applyMarkdownStyles(textView: NotionStyleTextView, noteColor: NoteColor) {
             // Guard against calling while user is in active IME composition
             if textView.hasMarkedText() { return }
@@ -156,15 +179,14 @@ struct RichMarkdownEditor: NSViewRepresentable {
             baseParagraph.lineSpacing = 5
             baseParagraph.paragraphSpacing = 4
 
-            textStorage.beginEditing()
-
-            // 1. Reset all characters to base style
-            textStorage.setAttributes([
+            let baseAttributes: [NSAttributedString.Key: Any] = [
                 .font: baseFont,
                 .foregroundColor: baseColor,
                 .paragraphStyle: baseParagraph
-            ], range: fullRange)
+            ]
 
+            // 1. Build target attributed string purely in memory
+            let target = NSMutableAttributedString(string: text, attributes: baseAttributes)
             let nsText = text as NSString
             let accentNS = noteColor.nsAccentColor(isDark: isDark)
             let dimSyntaxColor = NSColor.secondaryLabelColor.withAlphaComponent(0.4)
@@ -179,51 +201,51 @@ struct RichMarkdownEditor: NSViewRepresentable {
                     let textRange = NSRange(location: lineRange.location + 2, length: lineRange.length - 2)
                     let h1Font = NSFont.systemFont(ofSize: 18.5, weight: .bold)
 
-                    textStorage.addAttribute(.foregroundColor, value: accentNS.withAlphaComponent(0.45), range: markerRange)
-                    textStorage.addAttribute(.font, value: NSFont.systemFont(ofSize: 12, weight: .bold), range: markerRange)
-                    textStorage.addAttribute(.font, value: h1Font, range: textRange)
-                    textStorage.addAttribute(.foregroundColor, value: baseColor, range: textRange)
+                    target.addAttribute(.foregroundColor, value: accentNS.withAlphaComponent(0.45), range: markerRange)
+                    target.addAttribute(.font, value: NSFont.systemFont(ofSize: 12, weight: .bold), range: markerRange)
+                    target.addAttribute(.font, value: h1Font, range: textRange)
+                    target.addAttribute(.foregroundColor, value: baseColor, range: textRange)
                 } else if line.hasPrefix("## ") {
                     let markerRange = NSRange(location: lineRange.location, length: 3)
                     let textRange = NSRange(location: lineRange.location + 3, length: lineRange.length - 3)
                     let h2Font = NSFont.systemFont(ofSize: 16.0, weight: .semibold)
 
-                    textStorage.addAttribute(.foregroundColor, value: accentNS.withAlphaComponent(0.45), range: markerRange)
-                    textStorage.addAttribute(.font, value: NSFont.systemFont(ofSize: 11, weight: .semibold), range: markerRange)
-                    textStorage.addAttribute(.font, value: h2Font, range: textRange)
-                    textStorage.addAttribute(.foregroundColor, value: baseColor, range: textRange)
+                    target.addAttribute(.foregroundColor, value: accentNS.withAlphaComponent(0.45), range: markerRange)
+                    target.addAttribute(.font, value: NSFont.systemFont(ofSize: 11, weight: .semibold), range: markerRange)
+                    target.addAttribute(.font, value: h2Font, range: textRange)
+                    target.addAttribute(.foregroundColor, value: baseColor, range: textRange)
                 } else if line.hasPrefix("### ") {
                     let markerRange = NSRange(location: lineRange.location, length: 4)
                     let textRange = NSRange(location: lineRange.location + 4, length: lineRange.length - 4)
                     let h3Font = NSFont.systemFont(ofSize: 14.5, weight: .semibold)
 
-                    textStorage.addAttribute(.foregroundColor, value: accentNS.withAlphaComponent(0.45), range: markerRange)
-                    textStorage.addAttribute(.font, value: NSFont.systemFont(ofSize: 10, weight: .semibold), range: markerRange)
-                    textStorage.addAttribute(.font, value: h3Font, range: textRange)
-                    textStorage.addAttribute(.foregroundColor, value: baseColor, range: textRange)
+                    target.addAttribute(.foregroundColor, value: accentNS.withAlphaComponent(0.45), range: markerRange)
+                    target.addAttribute(.font, value: NSFont.systemFont(ofSize: 10, weight: .semibold), range: markerRange)
+                    target.addAttribute(.font, value: h3Font, range: textRange)
+                    target.addAttribute(.foregroundColor, value: baseColor, range: textRange)
                 }
                 // Checklists
                 else if line.contains("[ ]") {
                     if let boxRange = line.range(of: "[ ]") {
                         let nsBoxRange = NSRange(boxRange, in: line)
-                        let target = NSRange(location: lineRange.location + nsBoxRange.location, length: nsBoxRange.length)
-                        textStorage.addAttribute(.foregroundColor, value: accentNS, range: target)
-                        textStorage.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 13, weight: .bold), range: target)
+                        let boxTarget = NSRange(location: lineRange.location + nsBoxRange.location, length: nsBoxRange.length)
+                        target.addAttribute(.foregroundColor, value: accentNS, range: boxTarget)
+                        target.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 13, weight: .bold), range: boxTarget)
                     }
                 } else if line.contains("[x]") || line.contains("[X]") {
                     if let boxRange = line.range(of: "[x]", options: .caseInsensitive) {
                         let nsBoxRange = NSRange(boxRange, in: line)
-                        let target = NSRange(location: lineRange.location + nsBoxRange.location, length: nsBoxRange.length)
-                        textStorage.addAttribute(.foregroundColor, value: NSColor.systemGreen, range: target)
-                        textStorage.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 13, weight: .bold), range: target)
+                        let boxTarget = NSRange(location: lineRange.location + nsBoxRange.location, length: nsBoxRange.length)
+                        target.addAttribute(.foregroundColor, value: NSColor.systemGreen, range: boxTarget)
+                        target.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 13, weight: .bold), range: boxTarget)
 
                         // Strikethrough remaining text on this line
                         let afterBox = lineRange.location + nsBoxRange.location + nsBoxRange.length
                         if afterBox < lineRange.location + lineRange.length {
                             let textLength = (lineRange.location + lineRange.length) - afterBox
                             let strikeRange = NSRange(location: afterBox, length: textLength)
-                            textStorage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: strikeRange)
-                            textStorage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: strikeRange)
+                            target.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: strikeRange)
+                            target.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: strikeRange)
                         }
                     }
                 }
@@ -233,15 +255,15 @@ struct RichMarkdownEditor: NSViewRepresentable {
                     let textRange = NSRange(location: lineRange.location + 2, length: lineRange.length - 2)
                     let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
 
-                    textStorage.addAttribute(.foregroundColor, value: accentNS, range: markerRange)
-                    textStorage.addAttribute(.font, value: italicFont, range: textRange)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: textRange)
+                    target.addAttribute(.foregroundColor, value: accentNS, range: markerRange)
+                    target.addAttribute(.font, value: italicFont, range: textRange)
+                    target.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: textRange)
                 }
                 // Bullet List
                 else if line.hasPrefix("- ") || line.hasPrefix("* ") {
                     let markerRange = NSRange(location: lineRange.location, length: 2)
-                    textStorage.addAttribute(.foregroundColor, value: accentNS, range: markerRange)
-                    textStorage.addAttribute(.font, value: NSFont.systemFont(ofSize: 14, weight: .bold), range: markerRange)
+                    target.addAttribute(.foregroundColor, value: accentNS, range: markerRange)
+                    target.addAttribute(.font, value: NSFont.systemFont(ofSize: 14, weight: .bold), range: markerRange)
                 }
             }
 
@@ -250,9 +272,9 @@ struct RichMarkdownEditor: NSViewRepresentable {
             applyRegex(pattern: #"\*\*([^\*]+)\*\*"#, in: nsText) { match in
                 let full = match.range
                 let inner = match.range(at: 1)
-                textStorage.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location, length: 2))
-                textStorage.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location + full.length - 2, length: 2))
-                textStorage.addAttribute(.font, value: NSFont.systemFont(ofSize: 13.5, weight: .bold), range: inner)
+                target.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location, length: 2))
+                target.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location + full.length - 2, length: 2))
+                target.addAttribute(.font, value: NSFont.systemFont(ofSize: 13.5, weight: .bold), range: inner)
             }
 
             // Italic: *text* (excluding **)
@@ -260,9 +282,9 @@ struct RichMarkdownEditor: NSViewRepresentable {
                 let full = match.range
                 let inner = match.range(at: 1)
                 let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
-                textStorage.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location, length: 1))
-                textStorage.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location + full.length - 1, length: 1))
-                textStorage.addAttribute(.font, value: italicFont, range: inner)
+                target.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location, length: 1))
+                target.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location + full.length - 1, length: 1))
+                target.addAttribute(.font, value: italicFont, range: inner)
             }
 
             // Inline code: `code`
@@ -271,11 +293,11 @@ struct RichMarkdownEditor: NSViewRepresentable {
                 let full = match.range
                 let inner = match.range(at: 1)
                 let monoFont = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .medium)
-                textStorage.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location, length: 1))
-                textStorage.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location + full.length - 1, length: 1))
-                textStorage.addAttribute(.font, value: monoFont, range: inner)
-                textStorage.addAttribute(.foregroundColor, value: accentNS, range: inner)
-                textStorage.addAttribute(.backgroundColor, value: codeBg, range: full)
+                target.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location, length: 1))
+                target.addAttribute(.foregroundColor, value: dimSyntaxColor, range: NSRange(location: full.location + full.length - 1, length: 1))
+                target.addAttribute(.font, value: monoFont, range: inner)
+                target.addAttribute(.foregroundColor, value: accentNS, range: inner)
+                target.addAttribute(.backgroundColor, value: codeBg, range: full)
             }
 
             // Multi-line Code Block: ```...```
@@ -283,18 +305,81 @@ struct RichMarkdownEditor: NSViewRepresentable {
             applyRegex(pattern: #"```[\w]*\n[\s\S]*?```"#, in: nsText) { match in
                 let full = match.range
                 let monoFont = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
-                textStorage.addAttribute(.font, value: monoFont, range: full)
-                textStorage.addAttribute(.backgroundColor, value: blockBg, range: full)
+                target.addAttribute(.font, value: monoFont, range: full)
+                target.addAttribute(.backgroundColor, value: blockBg, range: full)
             }
 
             // Links: [text](url)
             applyRegex(pattern: #"\[([^\]]+)\]\(([^)]+)\)"#, in: nsText) { match in
                 let textRange = match.range(at: 1)
-                textStorage.addAttribute(.foregroundColor, value: NSColor.linkColor, range: textRange)
-                textStorage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: textRange)
+                target.addAttribute(.foregroundColor, value: NSColor.linkColor, range: textRange)
+                target.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: textRange)
             }
 
+            // 4. Differential attribute update to textStorage:
+            // Only update ranges where attributes genuinely differ. Avoids wiping fullRange attributes
+            // which triggers destructive layout invalidation and CJK/IME font-fallback flickering!
+            textStorage.beginEditing()
+            target.enumerateAttributes(in: fullRange, options: []) { targetAttributes, targetRange, _ in
+                textStorage.enumerateAttributes(in: targetRange, options: []) { currentAttributes, subRange, _ in
+                    if !self.areAttributesCompatible(currentAttributes, targetAttributes) {
+                        textStorage.setAttributes(targetAttributes, range: subRange)
+                    }
+                }
+            }
             textStorage.endEditing()
+        }
+
+        // Check if font is compatible, accounting for macOS CJK CoreText Font Fallback
+        // (e.g. .PingFangSC substituted for .AppleSystemUIFont at the same size and weight)
+        private func isFontCompatible(_ current: NSFont, target: NSFont) -> Bool {
+            if current.isEqual(target) { return true }
+            if abs(current.pointSize - target.pointSize) > 0.01 { return false }
+
+            let currentTraits = NSFontManager.shared.traits(of: current)
+            let targetTraits = NSFontManager.shared.traits(of: target)
+            if currentTraits.contains(.boldFontMask) != targetTraits.contains(.boldFontMask) {
+                return false
+            }
+            if currentTraits.contains(.italicFontMask) != targetTraits.contains(.italicFontMask) {
+                return false
+            }
+
+            let isCurrentMono = currentTraits.contains(.fixedPitchFontMask) || current.isFixedPitch
+            let isTargetMono = targetTraits.contains(.fixedPitchFontMask) || target.isFixedPitch
+            if isCurrentMono != isTargetMono {
+                return false
+            }
+
+            return true
+        }
+
+        private func areAttributesCompatible(_ current: [NSAttributedString.Key: Any], _ target: [NSAttributedString.Key: Any]) -> Bool {
+            for (key, targetVal) in target {
+                guard let currentVal = current[key] else { return false }
+                if key == .font, let currentFont = currentVal as? NSFont, let targetFont = targetVal as? NSFont {
+                    if !isFontCompatible(currentFont, target: targetFont) {
+                        return false
+                    }
+                } else if let objC = currentVal as? NSObject, let objT = targetVal as? NSObject {
+                    if !objC.isEqual(objT) {
+                        return false
+                    }
+                } else {
+                    return false
+                }
+            }
+
+            for (key, _) in current {
+                if target[key] == nil {
+                    // Attributes that must be cleared if not present in target
+                    if key == .strikethroughStyle || key == .underlineStyle || key == .backgroundColor {
+                        return false
+                    }
+                }
+            }
+
+            return true
         }
 
         private func applyRegex(pattern: String, in text: NSString, handler: (NSTextCheckingResult) -> Void) {
@@ -307,21 +392,8 @@ struct RichMarkdownEditor: NSViewRepresentable {
     }
 }
 
-// MARK: - Notion-Style Custom NSTextView with Interactive Checkbox Click & IME Support
+// MARK: - Notion-Style Custom NSTextView with Interactive Checkbox Click
 class NotionStyleTextView: NSTextView {
-    override func insertText(_ string: Any, replacementRange: NSRange) {
-        super.insertText(string, replacementRange: replacementRange)
-        // Once text is committed from IME (marked text cleared), trigger styling
-        if !hasMarkedText() {
-            (delegate as? RichMarkdownEditor.Coordinator)?.handleTextCommitted(textView: self)
-        }
-    }
-
-    override func unmarkText() {
-        super.unmarkText()
-        (delegate as? RichMarkdownEditor.Coordinator)?.handleTextCommitted(textView: self)
-    }
-
     override func mouseDown(with event: NSEvent) {
         let clickPoint = convert(event.locationInWindow, from: nil)
         let charIndex = characterIndexForInsertion(at: clickPoint)
